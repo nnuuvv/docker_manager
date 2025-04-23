@@ -1,0 +1,10 @@
+@font-face {
+    font-family: "Excalifont";
+    font-display: swap;
+    src: url('/static/fonts/Excalifont-Regular.woff2') format("woff2");
+}
+
+:root {
+    font-family: "Excalifont" !important;
+}
+

@@ -1,95 +1,28 @@
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
-import gleam/list
 import gleam/option
-import gleam/pair
-import gleam/result
-import gleam/string
-import lustre.{type App}
-import lustre/attribute
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/event
 
-import shellout
-
-pub fn component() -> App(_, Model, Msg) {
-  lustre.simple(init, update, view)
-}
-
-// MODEL --------------------------------------------------------------------
-
-pub type Model =
-  List(ContainerData)
-
-fn init(_) -> Model {
-  let assert Ok(data) = get_running_containers()
-  data
-}
-
-// UPDATE -------------------------------------------------------------------
-
-pub opaque type Msg {
-  FetchData
-}
-
-fn update(model: Model, msg: Msg) -> Model {
-  case msg {
-    FetchData -> {
-      let value = get_running_containers()
-
-      case value {
-        Error(_) -> model
-        Ok(value) -> value
-      }
-    }
-  }
-}
-
-// VIEW ---------------------------------------------------------------------
-
-fn view(model: Model) -> Element(Msg) {
-  let styles = [#("display", "flex"), #("justify-content", "space-between")]
-  html.div([attribute.styles(styles)], [
-    html.button([event.on_click(FetchData)], [html.text("Update")]),
-    html.div(
-      [attribute.styles(styles)],
-      list.map(model, fn(item) { view_container(item) }),
-    ),
-  ])
-}
-
-fn view_container(data: ContainerData) {
-  html.div([], [
-    html.text(
-      "Container: " <> list.fold(data.names, "", fn(a, b) { a <> " " <> b }),
-    ),
-  ])
-}
-
-// GET DATA -----------------------------------------------------------------
-
-fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
-  use shell_result <- result.try(
-    shellout.command(
-      run: "curl",
-      with: [
-        "--unix-socket", "/var/run/docker.sock", "http:///v1.49/containers/json",
-      ],
-      in: ".",
-      opt: [],
-    )
-    |> result.replace_error(json.UnexpectedEndOfInput),
-  )
-
-  string.split_once(shell_result, "[")
-  |> result.map(fn(splits) { string.append("[", pair.second(splits)) })
-  |> result.replace_error(json.UnexpectedEndOfInput)
-  |> result.try(fn(data_json) {
-    json.parse(data_json, decode.list(container_data_decoder()))
-  })
-}
+//fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
+//  use shell_result <- result.try(
+//    shellout.command(
+//      run: "curl",
+//      with: [
+//        "--unix-socket", "/var/run/docker.sock", "http:///v1.49/containers/json",
+//      ],
+//      in: ".",
+//      opt: [],
+//    )
+//    |> result.replace_error(json.UnexpectedEndOfInput),
+//  )
+//
+//  string.split_once(shell_result, "[")
+//  |> result.map(fn(splits) { string.append("[", pair.second(splits)) })
+//  |> result.replace_error(json.UnexpectedEndOfInput)
+//  |> result.try(fn(data_json) {
+//    json.parse(data_json, decode.list(container_data_decoder()))
+//  })
+//}
 
 pub type ContainerData {
   ContainerData(
@@ -109,7 +42,52 @@ pub type ContainerData {
   )
 }
 
-fn container_data_decoder() -> decode.Decoder(ContainerData) {
+pub fn encode_container_list(containers: List(ContainerData)) -> json.Json {
+  json.array(containers, encode_container_data)
+}
+
+pub fn encode_container_data(container_data: ContainerData) -> json.Json {
+  let ContainerData(
+    id:,
+    names:,
+    image:,
+    image_id:,
+    command:,
+    created:,
+    ports:,
+    labels:,
+    state:,
+    status:,
+    host_config:,
+    network_settings:,
+    mounts:,
+  ) = container_data
+  json.object([
+    #("Id", json.string(id)),
+    #("Names", json.array(names, json.string)),
+    #("Image", json.string(image)),
+    #("ImageID", json.string(image_id)),
+    #("Command", json.string(command)),
+    #("Created", json.int(created)),
+    #("Ports", json.array(ports, encode_port)),
+    #("Labels", json.dict(labels, fn(string) { string }, json.string)),
+    #("State", json.string(state)),
+    #("Status", json.string(status)),
+    #("HostConfig", encode_host_config(host_config)),
+    #(
+      "NetworkSettings",
+      json.object([
+        #(
+          "Networks",
+          json.dict(network_settings, fn(string) { string }, encode_network),
+        ),
+      ]),
+    ),
+    #("Mounts", json.array(mounts, encode_mount)),
+  ])
+}
+
+pub fn container_data_decoder() -> decode.Decoder(ContainerData) {
   use id <- decode.field("Id", decode.string)
   use names <- decode.field("Names", decode.list(decode.string))
   use image <- decode.field("Image", decode.string)
@@ -151,6 +129,16 @@ pub type Port {
   Port(ip: String, private_port: Int, public_port: Int, port_type: String)
 }
 
+fn encode_port(port: Port) -> json.Json {
+  let Port(ip:, private_port:, public_port:, port_type:) = port
+  json.object([
+    #("IP", json.string(ip)),
+    #("PrivatePort", json.int(private_port)),
+    #("PublicPort", json.int(public_port)),
+    #("Type", json.string(port_type)),
+  ])
+}
+
 fn port_decoder() -> decode.Decoder(Port) {
   use ip <- decode.field("IP", decode.string)
   use private_port <- decode.field("PrivatePort", decode.int)
@@ -161,6 +149,14 @@ fn port_decoder() -> decode.Decoder(Port) {
 
 pub type HostConfig {
   HostConfig(network_mode: String, annotations: dict.Dict(String, String))
+}
+
+fn encode_host_config(host_config: HostConfig) -> json.Json {
+  let HostConfig(network_mode:, annotations:) = host_config
+  json.object([
+    #("NetworkMode", json.string(network_mode)),
+    #("Annotations", json.dict(annotations, fn(string) { string }, json.string)),
+  ])
 }
 
 fn host_config_decoder() -> decode.Decoder(HostConfig) {
@@ -175,6 +171,15 @@ fn host_config_decoder() -> decode.Decoder(HostConfig) {
 
 pub type Network {
   Network(gateway: String, ip_address: String, ip_prefix_len: Int)
+}
+
+fn encode_network(network: Network) -> json.Json {
+  let Network(gateway:, ip_address:, ip_prefix_len:) = network
+  json.object([
+    #("Gateway", json.string(gateway)),
+    #("IPAddress", json.string(ip_address)),
+    #("IPPrefixLen", json.int(ip_prefix_len)),
+  ])
 }
 
 fn network_decoder() -> decode.Decoder(Network) {
@@ -195,6 +200,35 @@ pub type Mount {
     rw: Bool,
     propagation: String,
   )
+}
+
+fn encode_mount(mount: Mount) -> json.Json {
+  let Mount(
+    mount_type:,
+    name:,
+    source:,
+    destination:,
+    driver:,
+    mode:,
+    rw:,
+    propagation:,
+  ) = mount
+  json.object([
+    #("Type", json.string(mount_type)),
+    #("Name", case name {
+      option.None -> json.null()
+      option.Some(value) -> json.string(value)
+    }),
+    #("Source", json.string(source)),
+    #("Destination", json.string(destination)),
+    #("Driver", case driver {
+      option.None -> json.null()
+      option.Some(value) -> json.string(value)
+    }),
+    #("Mode", json.string(mode)),
+    #("RW", json.bool(rw)),
+    #("Propagation", json.string(propagation)),
+  ])
 }
 
 fn mount_decoder() -> decode.Decoder(Mount) {

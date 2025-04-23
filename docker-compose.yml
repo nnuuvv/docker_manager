@@ -1,0 +1,5 @@
+services:
+  docker_manager:
+    build: .
+    container_name: docker_manager
+    restart: unless-stopped

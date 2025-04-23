@@ -1,7 +1,7 @@
 import gleeunit
 import gleeunit/should
 
-pub fn main() {
+pub fn main() -> Nil {
   gleeunit.main()
 }
 
