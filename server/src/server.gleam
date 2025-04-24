@@ -157,7 +157,8 @@ fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
     shellout.command(
       run: "curl",
       with: [
-        "--unix-socket", "/var/run/docker.sock", "http:///v1.49/containers/json",
+        "--unix-socket", "/var/run/docker.sock", "--silent",
+        "http:///v1.49/containers/json",
       ],
       in: ".",
       opt: [],
@@ -165,10 +166,6 @@ fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
     |> result.replace_error(json.UnexpectedEndOfInput),
   )
 
-  string.split_once(shell_result, "[")
-  |> result.map(fn(splits) { string.append("[", pair.second(splits)) })
-  |> result.replace_error(json.UnexpectedEndOfInput)
-  |> result.try(fn(data_json) {
-    json.parse(data_json, decode.list(container_data.container_data_decoder()))
-  })
+  json.parse(shell_result, decode.list(container_data.container_data_decoder()))
+  |> echo
 }
