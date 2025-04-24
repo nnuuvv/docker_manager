@@ -24,6 +24,9 @@ RUN cd /build/server \
 # Runtime stage - slim image with only what's needed to run
 FROM ghcr.io/gleam-lang/gleam:${GLEAM_VERSION}-erlang-alpine
 
+# Install packages
+RUN apk add curl
+
 # Copy the compiled server code from the builder stage
 COPY --from=builder /build/server/build/erlang-shipment /app
 

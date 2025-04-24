@@ -1,10 +1,12 @@
 import container_data.{type ContainerData}
+import envoy
 import gleam/bytes_tree
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http.{Get, Post}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/json
 import gleam/option.{None, Some}
 import gleam/pair
@@ -35,11 +37,20 @@ pub fn main() -> Nil {
 
   let assert Ok(_) =
     mist.new(handler)
-    |> mist.port(3000)
+    |> mist.port(get_port())
     |> mist.start_http()
 
   process.sleep_forever()
   Nil
+}
+
+/// Gets the port from the `PORT` environment variable.
+/// Defaults to 3000 if its not set.
+///
+fn get_port() -> Int {
+  envoy.get("PORT")
+  |> result.then(fn(port_string) { int.parse(port_string) })
+  |> result.unwrap(3000)
 }
 
 fn serve_app() {
@@ -74,8 +85,7 @@ fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
   let file_path = string.join(path_segments, "/")
   let priv_dir = "./priv"
 
-  let full_path =
-    string.concat([priv_dir, "/static/", file_path])
+  let full_path = string.concat([priv_dir, "/static/", file_path])
 
   case simplifile.read_bits(full_path) {
     Ok(content) -> {
