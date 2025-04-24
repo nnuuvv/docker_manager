@@ -2,6 +2,7 @@ import container_data.{type ContainerData}
 import envoy
 import gleam/bytes_tree
 import gleam/dynamic/decode
+import gleam/erlang
 import gleam/erlang/process
 import gleam/http.{Get, Post}
 import gleam/http/request.{type Request}
@@ -38,6 +39,7 @@ pub fn main() -> Nil {
   let assert Ok(_) =
     mist.new(handler)
     |> mist.port(get_port())
+    |> mist.bind("0.0.0.0")
     |> mist.start_http()
 
   process.sleep_forever()
@@ -83,7 +85,11 @@ fn serve_app() {
 
 fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
   let file_path = string.join(path_segments, "/")
-  let priv_dir = "./priv"
+
+  let priv_dir = case erlang.priv_directory("server") {
+    Ok(dir) -> dir
+    Error(_) -> "./priv"
+  }
 
   let full_path = string.concat([priv_dir, "/static/", file_path])
 

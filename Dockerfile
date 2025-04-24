@@ -32,8 +32,7 @@ COPY --from=builder /build/server/build/erlang-shipment /app
 
 # Set up the entrypoint
 WORKDIR /app
-RUN echo '#!/bin/sh\nexec ./entrypoint.sh "$@"' > /app/start.sh \
-  && chmod +x /app/start.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set environment variables
 ENV PORT=8080
@@ -42,4 +41,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run the server
-CMD ["/app/start.sh", "run"]
+CMD ["/app/entrypoint.sh", "run"]
