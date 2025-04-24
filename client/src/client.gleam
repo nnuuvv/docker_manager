@@ -1,10 +1,10 @@
-import container_data.{type ContainerData}
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
+import gleam/option
 import gleam/result
 import lustre
 import lustre/attribute
@@ -13,6 +13,10 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import rsvp
+import shared/container.{type Container}
+import shared/container_data.{type ContainerData}
+import shared/node.{type Node}
+import shared/virtual_machine.{type VirtualMachine}
 
 pub fn main() -> Nil {
   let flags = get_initial_state()
@@ -24,10 +28,10 @@ pub fn main() -> Nil {
 }
 
 pub type Model {
-  Model(container_data: List(ContainerData))
+  Model(node_data: List(Node))
 }
 
-fn get_initial_state() -> List(ContainerData) {
+fn get_initial_state() -> List(Node) {
   []
 }
 
@@ -41,24 +45,30 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
 pub opaque type Msg {
   UserClickedUpdateContainerData
-  ServerUpdatedContainerData(data: Result(List(ContainerData), rsvp.Error))
+  ServerUpdatedNodeData(data: Result(Node, rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   model |> echo
   msg |> echo
+
   case msg {
     UserClickedUpdateContainerData -> {
       #(model, update_container_data())
     }
-    ServerUpdatedContainerData(data) -> {
+    ServerUpdatedNodeData(data) -> {
       let value = case data {
         Error(error) -> {
           error |> echo
 
           model
         }
-        Ok(container_data) -> Model(..model, container_data:)
+        Ok(node) -> {
+          model.node_data
+          |> list.filter(fn(cur) { cur.name != node.name })
+          |> list.prepend(node)
+          |> Model
+        }
       }
 
       #(value, effect.none())
@@ -67,10 +77,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn update_container_data() -> Effect(Msg) {
-  let url = "/api/container_data/"
+  let url = "/api/node_data/"
 
-  let decoder = decode.list(container_data.container_data_decoder())
-  let handler = rsvp.expect_json(decoder, ServerUpdatedContainerData)
+  let handler = rsvp.expect_json(node.node_decoder(), ServerUpdatedNodeData)
 
   rsvp.get(url, handler)
 }
@@ -85,15 +94,37 @@ pub fn view(model: Model) -> Element(Msg) {
     ]),
     html.div(
       [attribute.styles(styles)],
-      list.map(model.container_data, fn(item) { view_container(item) }),
+      list.map(model.node_data, fn(node) { view_node(node) }),
     ),
   ])
 }
 
-fn view_container(data: ContainerData) {
+fn view_node(node: Node) {
+  html.div(
+    [],
+    node.virtual_machines
+      |> list.map(fn(vm) { view_virtual_machine(vm) }),
+  )
+}
+
+fn view_virtual_machine(vm: VirtualMachine) {
+  let container_elements = case vm.containers {
+    option.None -> html.div([], [])
+    option.Some(containers) ->
+      html.div(
+        [],
+        containers |> list.map(fn(container) { view_container(container) }),
+      )
+  }
+
+  html.div([], [container_elements])
+}
+
+fn view_container(data: Container) -> Element(Msg) {
   html.div([], [
     html.text(
-      "Container: " <> list.fold(data.names, "", fn(a, b) { a <> " " <> b }),
+      "Container: "
+      <> list.fold(data.data.names, "", fn(a, b) { a <> " " <> b }),
     ),
   ])
 }

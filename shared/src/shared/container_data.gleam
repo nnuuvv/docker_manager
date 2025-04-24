@@ -3,27 +3,6 @@ import gleam/dynamic/decode
 import gleam/json
 import gleam/option
 
-//fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
-//  use shell_result <- result.try(
-//    shellout.command(
-//      run: "curl",
-//      with: [
-//        "--unix-socket", "/var/run/docker.sock", "http:///v1.49/containers/json",
-//      ],
-//      in: ".",
-//      opt: [],
-//    )
-//    |> result.replace_error(json.UnexpectedEndOfInput),
-//  )
-//
-//  string.split_once(shell_result, "[")
-//  |> result.map(fn(splits) { string.append("[", pair.second(splits)) })
-//  |> result.replace_error(json.UnexpectedEndOfInput)
-//  |> result.try(fn(data_json) {
-//    json.parse(data_json, decode.list(container_data_decoder()))
-//  })
-//}
-
 pub type ContainerData {
   ContainerData(
     id: String,

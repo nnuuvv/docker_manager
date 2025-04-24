@@ -1,4 +1,3 @@
-import container_data.{type ContainerData}
 import envoy
 import gleam/bytes_tree
 import gleam/dynamic/decode
@@ -9,6 +8,7 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/pair
 import gleam/result
@@ -17,6 +17,10 @@ import lustre/attribute
 import lustre/element
 import lustre/element/html
 import mist.{type Connection, type ResponseData}
+import shared/container
+import shared/container_data.{type ContainerData}
+import shared/node
+import shared/virtual_machine
 import shellout
 import simplifile
 
@@ -26,7 +30,7 @@ pub fn main() -> Nil {
     let method = req.method
 
     case method, path {
-      Get, ["api", "container_data"] -> handle_get_container_data()
+      Get, ["api", "node_data"] -> handle_get_node_data()
       Get, ["static", ..rest] -> serve_static(rest)
       Get, _ -> serve_app()
 
@@ -91,9 +95,7 @@ fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
     Error(_) -> "./priv"
   }
 
-  let full_path =
-    string.concat([priv_dir, "/static/", file_path])
-    |> echo
+  let full_path = string.concat([priv_dir, "/static/", file_path])
 
   case simplifile.read_bits(full_path) {
     Ok(content) -> {
@@ -128,28 +130,27 @@ fn determine_content_type(file_path: String) -> String {
   }
 }
 
-fn handle_get_container_data() -> Response(ResponseData) {
-  let containers = get_running_containers()
+fn handle_get_node_data() -> Response(ResponseData) {
+  let containers =
+    get_running_containers()
+    |> option.from_result()
+    |> option.map(fn(data) {
+      data |> list.map(fn(data) { container.Container(data, False) })
+    })
+    |> virtual_machine.VirtualMachine("Example Virtual Machine", _, False)
+    |> list.prepend([], _)
+    |> node.Node("Example Node Name", _, False)
 
-  case containers {
-    Error(_) ->
-      response.new(500)
-      |> response.set_body(
-        mist.Bytes(bytes_tree.from_string("Failed to get container data")),
-      )
-    Ok(containers) -> {
-      let body =
-        containers
-        |> json.array(container_data.encode_container_data)
-        |> json.to_string()
-        |> bytes_tree.from_string()
-        |> mist.Bytes
+  let body =
+    containers
+    |> node.encode_node()
+    |> json.to_string()
+    |> bytes_tree.from_string()
+    |> mist.Bytes
 
-      response.new(200)
-      |> response.set_body(body)
-      |> response.set_header("content-type", "application/json")
-    }
-  }
+  response.new(200)
+  |> response.set_body(body)
+  |> response.set_header("content-type", "application/json")
 }
 
 fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
@@ -167,5 +168,4 @@ fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
   )
 
   json.parse(shell_result, decode.list(container_data.container_data_decoder()))
-  |> echo
 }
