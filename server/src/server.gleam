@@ -91,7 +91,9 @@ fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
     Error(_) -> "./priv"
   }
 
-  let full_path = string.concat([priv_dir, "/static/", file_path])
+  let full_path =
+    string.concat([priv_dir, "/static/", file_path])
+    |> echo
 
   case simplifile.read_bits(full_path) {
     Ok(content) -> {
@@ -117,7 +119,11 @@ fn determine_content_type(file_path: String) -> String {
     False ->
       case string.ends_with(file_path, ".css") {
         True -> "text/css"
-        False -> "text/plain"
+        False ->
+          case string.ends_with(file_path, ".woff2") {
+            True -> "font/woff2"
+            False -> "text/plain"
+          }
       }
   }
 }
