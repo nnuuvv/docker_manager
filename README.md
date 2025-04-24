@@ -1,5 +1,5 @@
 # docker_manager
 
 ```sh
-docker build .
+docker compose up --build
 ```
