@@ -19,6 +19,7 @@ import lustre/element/html
 import mist.{type Connection, type ResponseData}
 import shared/container
 import shared/container_data.{type ContainerData}
+import shared/element_state
 import shared/node
 import shared/virtual_machine
 import shellout
@@ -63,20 +64,28 @@ fn serve_app() {
   //let containers = get_running_containers() |> result.unwrap([])
 
   let html =
-    html.html([], [
-      html.head([], [
-        html.title([], "Docker manager"),
-        html.link([
-          attribute.href("/static/styles/main.css"),
-          attribute.rel("stylesheet"),
+    html.html(
+      [
+        attribute.styles([
+          #("background-color", "#181414"),
+          #("color", "#d8d4d4"),
         ]),
-        html.script(
-          [attribute.type_("module"), attribute.src("/static/client.mjs")],
-          "",
-        ),
-      ]),
-      html.body([], [html.div([attribute.id("app")], [])]),
-    ])
+      ],
+      [
+        html.head([], [
+          html.title([], "Docker manager"),
+          html.link([
+            attribute.href("/static/styles/main.css"),
+            attribute.rel("stylesheet"),
+          ]),
+          html.script(
+            [attribute.type_("module"), attribute.src("/static/client.mjs")],
+            "",
+          ),
+        ]),
+        html.body([], [html.div([attribute.id("app")], [])]),
+      ],
+    )
 
   response.new(200)
   |> response.set_body(
@@ -135,11 +144,9 @@ fn handle_get_node_data() -> Response(ResponseData) {
     get_running_containers()
     |> option.from_result()
     |> option.map(fn(data) {
-      data |> list.map(fn(data) { container.Container(data, False) })
+      data |> list.map(fn(data) { container.Container(data) })
     })
-    |> virtual_machine.VirtualMachine("Example Virtual Machine", _, False)
-    |> list.prepend([], _)
-    |> node.Node("Example Node Name", _, False)
+    |> node.Node("Main PC", _, option.None)
 
   let body =
     containers
@@ -159,7 +166,7 @@ fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
       run: "curl",
       with: [
         "--unix-socket", "/var/run/docker.sock", "--silent",
-        "http:///v1.49/containers/json",
+        "http:///v1.49/containers/json?all=true",
       ],
       in: ".",
       opt: [],

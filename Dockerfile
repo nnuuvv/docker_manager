@@ -15,7 +15,7 @@ RUN cd /build/server && gleam deps download
 
 # Compile the client code and output to server's static directory
 RUN cd /build/client \
-  && gleam run -m lustre/dev build --minify --outdir=/build/server/priv/static
+  && gleam run -m lustre/dev build --outdir=/build/server/priv/static
 
 # Compile the server code
 RUN cd /build/server \
@@ -35,10 +35,7 @@ WORKDIR /app
 RUN chmod +x /app/entrypoint.sh
 
 # Set environment variables
-ENV PORT=8080
-
-# Expose the port the server will run on
-EXPOSE 8080
+ENV PORT=3000
 
 # Run the server
 CMD ["/app/entrypoint.sh", "run"]

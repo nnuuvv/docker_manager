@@ -105,26 +105,44 @@ pub fn container_data_decoder() -> decode.Decoder(ContainerData) {
 
 pub type Port {
   /// IP ; PrivatePort ; PublicPort ; Type   ;;; in the json respectively
-  Port(ip: String, private_port: Int, public_port: Int, port_type: String)
+  Port(
+    ip: option.Option(String),
+    private_port: option.Option(Int),
+    public_port: option.Option(Int),
+    port_type: option.Option(String),
+  )
 }
 
 fn encode_port(port: Port) -> json.Json {
   let Port(ip:, private_port:, public_port:, port_type:) = port
   json.object([
-    #("IP", json.string(ip)),
-    #("PrivatePort", json.int(private_port)),
-    #("PublicPort", json.int(public_port)),
-    #("Type", json.string(port_type)),
+    #("IP", case ip {
+      option.None -> json.null()
+      option.Some(value) -> json.string(value)
+    }),
+    #("PrivatePort", case private_port {
+      option.None -> json.null()
+      option.Some(value) -> json.int(value)
+    }),
+    #("PublicPort", case public_port {
+      option.None -> json.null()
+      option.Some(value) -> json.int(value)
+    }),
+    #("Type", case port_type {
+      option.None -> json.null()
+      option.Some(value) -> json.string(value)
+    }),
   ])
 }
 
 fn port_decoder() -> decode.Decoder(Port) {
-  use ip <- decode.field("IP", decode.string)
-  use private_port <- decode.field("PrivatePort", decode.int)
-  use public_port <- decode.field("PublicPort", decode.int)
-  use port_type <- decode.field("Type", decode.string)
+  use ip <- decode.field("IP", decode.optional(decode.string))
+  use private_port <- decode.field("PrivatePort", decode.optional(decode.int))
+  use public_port <- decode.field("PublicPort", decode.optional(decode.int))
+  use port_type <- decode.field("Type", decode.optional(decode.string))
   decode.success(Port(ip:, private_port:, public_port:, port_type:))
 }
+
 
 pub type HostConfig {
   HostConfig(network_mode: String, annotations: dict.Dict(String, String))

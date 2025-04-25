@@ -6,17 +6,28 @@ import gleam/json
 import gleam/list
 import gleam/option
 import gleam/result
+import gleam/string
+import gleam/time/calendar
+import gleam/time/timestamp
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/element/svg
 import lustre/event
 import rsvp
 import shared/container.{type Container}
 import shared/container_data.{type ContainerData}
+import shared/element_state
 import shared/node.{type Node}
 import shared/virtual_machine.{type VirtualMachine}
+
+const red = "#fa5252"
+
+const green = "#2f9e44"
+
+const white = "#d8d4d4"
 
 pub fn main() -> Nil {
   let flags = get_initial_state()
@@ -28,7 +39,15 @@ pub fn main() -> Nil {
 }
 
 pub type Model {
-  Model(node_data: List(Node))
+  Model(node_data: List(Node), selected: Selected)
+}
+
+pub type Selected {
+  None
+  SelectedNode(node: Node)
+  SelectedNodeContainer(container: Container)
+  SelectedVirtualMachine(virtual_machine: VirtualMachine)
+  SelectedVirtualMachineContainer(container: Container)
 }
 
 fn get_initial_state() -> List(Node) {
@@ -36,7 +55,7 @@ fn get_initial_state() -> List(Node) {
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
-  let model = Model([])
+  let model = Model([], None)
 
   #(model, effect.none())
 }
@@ -44,8 +63,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
 // UPDATE -------------------------------------------------------------------
 
 pub opaque type Msg {
-  UserClickedUpdateContainerData
+  UserClickedUpdateNodeData
   ServerUpdatedNodeData(data: Result(Node, rsvp.Error))
+  UserSelectedItem(selected: Selected)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -53,8 +73,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   msg |> echo
 
   case msg {
-    UserClickedUpdateContainerData -> {
-      #(model, update_container_data())
+    UserClickedUpdateNodeData -> {
+      #(model, update_node_data())
     }
     ServerUpdatedNodeData(data) -> {
       let value = case data {
@@ -64,19 +84,25 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           model
         }
         Ok(node) -> {
-          model.node_data
-          |> list.filter(fn(cur) { cur.name != node.name })
-          |> list.prepend(node)
-          |> Model
+          Model(
+            ..model,
+            node_data: model.node_data
+              //|> list.filter(fn(cur) { cur.name != node.name })
+              |> list.prepend(node),
+          )
         }
       }
 
       #(value, effect.none())
     }
+    UserSelectedItem(selected) -> {
+      let model = Model(..model, selected:)
+      #(model, effect.none())
+    }
   }
 }
 
-fn update_container_data() -> Effect(Msg) {
+fn update_node_data() -> Effect(Msg) {
   let url = "/api/node_data/"
 
   let handler = rsvp.expect_json(node.node_decoder(), ServerUpdatedNodeData)
@@ -88,43 +114,257 @@ fn update_container_data() -> Effect(Msg) {
 
 pub fn view(model: Model) -> Element(Msg) {
   let styles = [#("display", "flex"), #("justify-content", "space-between")]
-  html.div([attribute.styles(styles)], [
-    html.button([event.on_click(UserClickedUpdateContainerData)], [
+  html.div([], [
+    // temporary update button
+    html.button([event.on_click(UserClickedUpdateNodeData)], [
       html.text("Update"),
     ]),
     html.div(
-      [attribute.styles(styles)],
-      list.map(model.node_data, fn(node) { view_node(node) }),
+      [
+        attribute.styles(styles),
+        attribute.class("has-border"),
+        attribute.id("main-window-border"),
+      ],
+      [
+        // Picker
+        html.div(
+          [
+            attribute.styles([
+              #("flex-direction", "column"),
+              #("display", "flex"),
+              #("padding", "10px"),
+            ]),
+            attribute.styles([#("width", "35%"), #("height", "100vh")]),
+            attribute.class("has-border"),
+            attribute.id("node-list"),
+          ],
+          list.map(model.node_data, fn(node) { view_node(node, styles) }),
+        ),
+        // detail view
+        html.div(
+          [
+            attribute.styles(styles),
+            attribute.styles([
+              #("width", "65%"),
+              #("height", "100vh"),
+              #("padding", "10px"),
+            ]),
+            attribute.class("has-border"),
+            attribute.id("detail-content"),
+          ],
+          [view_selected_details(model.selected)],
+        ),
+      ],
     ),
   ])
 }
 
-fn view_node(node: Node) {
-  html.div(
-    [],
-    node.virtual_machines
-      |> list.map(fn(vm) { view_virtual_machine(vm) }),
+// MAIN CONTENT ----------------------------------------------------------------------------------
+
+fn view_selected_details(selected: Selected) -> Element(Msg) {
+  case selected {
+    None -> html.text("No item has been selected.")
+    SelectedNode(node) -> view_node_details(node)
+    SelectedNodeContainer(container)
+    | SelectedVirtualMachineContainer(container) ->
+      view_container_details(container)
+    SelectedVirtualMachine(vm) -> view_virtual_machine_details(vm)
+  }
+}
+
+fn view_node_details(node: Node) -> Element(Msg) {
+  html.div([], [
+    html.text("imagine some detailed view of the " <> node.name <> " here."),
+  ])
+}
+
+fn view_virtual_machine_details(vm: VirtualMachine) -> Element(Msg) {
+  html.div([], [
+    html.text("imagine some detailed view of the " <> vm.name <> " here."),
+  ])
+}
+
+fn view_container_details(container: Container) -> Element(Msg) {
+  html.div([], [
+    html.p([], [
+      html.text(list.fold(container.data.names, "", fn(a, b) { a <> " " <> b })),
+    ]),
+    html.p([], [
+      html.text("Ports:"),
+      html.ul(
+        [],
+        container.data.ports
+          |> list.map(fn(port) {
+            html.li([], [
+              html.text(
+                int.to_string(option.unwrap(port.public_port, 0))
+                <> ":"
+                <> int.to_string(option.unwrap(port.private_port, 0))
+                <> option.unwrap(port.port_type, ""),
+              ),
+            ])
+          }),
+      ),
+    ]),
+    html.p([], [
+      html.text("Created: " <> unix_seconds_to_string(container.data.created)),
+    ]),
+    html.p([], [
+      html.text("Mounts:"),
+      html.ul(
+        [],
+        container.data.mounts
+          |> list.map(fn(mount) {
+            html.li([], [html.text(mount.source <> ":" <> mount.destination)])
+          }),
+      ),
+    ]),
+  ])
+}
+
+fn unix_seconds_to_string(seconds: Int) -> String {
+  let time: #(calendar.Date, calendar.TimeOfDay) =
+    timestamp.from_unix_seconds(seconds)
+    |> timestamp.to_calendar(calendar.local_offset())
+
+  [
+    int.to_string({ time.0 }.day),
+    int.to_string(calendar.month_to_int({ time.0 }.month)),
+    int.to_string({ time.0 }.year),
+  ]
+  |> string.join(".")
+  <> " "
+  <> string.join(
+    [int.to_string({ time.1 }.hours), int.to_string({ time.1 }.minutes)],
+    ":",
   )
 }
 
-fn view_virtual_machine(vm: VirtualMachine) {
-  let container_elements = case vm.containers {
-    option.None -> html.div([], [])
-    option.Some(containers) ->
+// LEFT LIST VIEW -----------------------------------------------------------------------------
+
+fn view_node(node: Node, styles: List(#(String, String))) {
+  html.div([attribute.styles([#("width", "100%")]), attribute.id("node")], [
+    html.div(
+      [
+        event.on_click(UserSelectedItem(SelectedNode(node))),
+        attribute.id("node-details"),
+      ],
+      [html.text(node.name)],
+    ),
+    html.div([attribute.id("node-containers")], case node.containers {
+      option.None -> []
+      option.Some(vms) ->
+        vms
+        |> list.map(fn(container) {
+          view_container(container, SelectedNodeContainer)
+        })
+    }),
+    html.div([attribute.id("node-vms")], case node.virtual_machines {
+      option.None -> [html.text("no vms found")]
+      option.Some(vms) ->
+        vms |> list.map(fn(vm) { view_virtual_machine(vm, styles) })
+    }),
+  ])
+}
+
+fn view_virtual_machine(vm: VirtualMachine, styles: List(#(String, String))) {
+  let container_elements = case vm.containers, vm.element_state {
+    option.None, element_state.Expanded -> html.text("no containers found")
+    option.None, _ -> html.div([], [])
+    option.Some(containers), _ ->
       html.div(
-        [],
-        containers |> list.map(fn(container) { view_container(container) }),
+        [attribute.id("vm-containers")],
+        containers
+          |> list.map(fn(container) {
+            view_container(container, SelectedVirtualMachineContainer)
+          }),
       )
   }
 
-  html.div([], [container_elements])
+  html.div(
+    [
+      event.on_click(UserSelectedItem(SelectedVirtualMachine(vm))),
+      attribute.class("clickable"),
+      attribute.id("vm"),
+    ],
+    [html.text(vm.name), container_elements],
+  )
 }
 
-fn view_container(data: Container) -> Element(Msg) {
-  html.div([], [
-    html.text(
-      "Container: "
-      <> list.fold(data.data.names, "", fn(a, b) { a <> " " <> b }),
-    ),
-  ])
+fn view_container_sublist(containers: List(Container)) {
+  let styles = [#("display", "flex"), #("justify-content", "space-between")]
+
+  html.div(
+    [attribute.styles(styles)],
+    containers
+      |> list.map(fn(container) {
+        html.div([attribute.styles(styles)], [
+          todo as "draw container and arrow to point at it ",
+        ])
+      }),
+  )
+}
+
+fn draw_svg_arrow(
+  width: #(String, String),
+  height: #(String, String),
+) -> Element(Msg) {
+  let steps = [
+    // go to x0 y0
+    "M0 0",
+    // line to curve start
+    "L0 100",
+    // relative curve 
+    "c0 2 2 2 6 2",
+    // upper arrow line
+    "l-3 1",
+    // move to arrow tip
+    "M-3 1",
+    // lower arrow line
+    "L-3 -1",
+  ]
+
+  html.svg(
+    [
+      attribute.styles([width, height]),
+      attribute.attribute("preserveAspectRatio", "xMidYMax slice"),
+    ],
+    [svg.path([attribute.attribute("d", string.join(steps, " "))])],
+  )
+}
+
+fn view_container(
+  container: Container,
+  selector: fn(Container) -> Selected,
+) -> Element(Msg) {
+  let status_color = case container.data.state {
+    "exited" -> red
+    "running" -> green
+    _ -> white
+  }
+
+  html.div(
+    [
+      event.on_click(UserSelectedItem(selector(container))),
+      attribute.class("clickable"),
+      attribute.id("vm-container"),
+      attribute.styles([
+        #("display", "flex"),
+        #("flex-direction", "row"),
+        #("justify-content", "space-between"),
+        #("margin", "2px"),
+      ]),
+    ],
+    [
+      html.div([], [
+        html.text(
+          list.fold(container.data.names, "", fn(a, b) { a <> " " <> b }),
+        ),
+      ]),
+      html.div(
+        [attribute.styles([#("text-align", "end"), #("color", status_color)])],
+        [html.text(container.data.state)],
+      ),
+    ],
+  )
 }
