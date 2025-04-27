@@ -9,3 +9,5 @@ services:
       PORT: 3001 # optionally set port, defaults to 3000 if unset
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # add any folder with existing docker-compose files you want to use as 1:1 bindings; i.e.: 
+      - /home/liv/source/gleam/docker_manager:/home/liv/source/gleam/docker_manager

@@ -1,3 +1,4 @@
+import gleam/dict
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
@@ -29,6 +30,8 @@ const green = "#2f9e44"
 
 const white = "#d8d4d4"
 
+const background = "#181414"
+
 pub fn main() -> Nil {
   let flags = get_initial_state()
 
@@ -45,9 +48,9 @@ pub type Model {
 pub type Selected {
   None
   SelectedNode(node: Node)
-  SelectedNodeContainer(container: Container)
+  SelectedNodeContainer(container: Container, compose_file: String)
   SelectedVirtualMachine(virtual_machine: VirtualMachine)
-  SelectedVirtualMachineContainer(container: Container)
+  SelectedVirtualMachineContainer(container: Container, compose_file: String)
 }
 
 fn get_initial_state() -> List(Node) {
@@ -66,6 +69,9 @@ pub opaque type Msg {
   UserClickedUpdateNodeData
   ServerUpdatedNodeData(data: Result(Node, rsvp.Error))
   UserSelectedItem(selected: Selected)
+  ServerReturnedComposeFile(file: Result(String, rsvp.Error))
+  UserUpdatedComposeFile(file: String)
+  UserClickedSaveComposeFile
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -79,8 +85,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ServerUpdatedNodeData(data) -> {
       let value = case data {
         Error(error) -> {
-          error |> echo
-
           model
         }
         Ok(node) -> {
@@ -96,11 +100,91 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(value, effect.none())
     }
     UserSelectedItem(selected) -> {
-      let model = Model(..model, selected:)
-      #(model, effect.none())
+      // make sure to set the file to empty when we change the selected item
+      let model = Model(..model, selected: update_compose_file(selected, ""))
+
+      let effect = case selected {
+        SelectedNodeContainer(_, _) | SelectedVirtualMachineContainer(_, _) ->
+          handle_get_compose_file(selected)
+        _ -> effect.none()
+      }
+
+      #(model, effect)
+    }
+    ServerReturnedComposeFile(file) -> {
+      case file {
+        Error(error) -> {
+          #(model, effect.none())
+        }
+        Ok(file) -> {
+          let selected = update_compose_file(model.selected, file)
+
+          #(Model(..model, selected: selected), effect.none())
+        }
+      }
+    }
+    UserUpdatedComposeFile(file) -> {
+      let selected = update_compose_file(model.selected, file)
+      #(Model(..model, selected: selected), effect.none())
+    }
+    UserClickedSaveComposeFile -> {
+      todo
     }
   }
 }
+
+// COMPOSE HANDLING --------------------------------------------------------
+
+fn update_compose_file(selected: Selected, file) -> Selected {
+  case selected {
+    SelectedNodeContainer(container, _) ->
+      SelectedNodeContainer(container, file)
+    SelectedVirtualMachineContainer(container, _) ->
+      SelectedVirtualMachineContainer(container, file)
+    _ -> selected
+  }
+}
+
+fn handle_get_compose_file(selected: Selected) -> Effect(Msg) {
+  case selected {
+    SelectedNodeContainer(container, _)
+    | SelectedVirtualMachineContainer(container, _) ->
+      get_compose_file(container.data.names)
+    _ -> effect.none()
+  }
+}
+
+// should realistically use something more identifying than the container name
+// but i want to be able to continue using my current docker compose folder structure
+// without having to figure out what id is what container etc.
+fn get_compose_file(container_names: List(String)) -> Effect(Msg) {
+  let container_name = get_container_name(container_names)
+  case container_name {
+    Error(_) -> effect.none()
+    Ok(container_name) -> {
+      let url = "/compose/" <> container_name
+
+      let handler = rsvp.expect_text(ServerReturnedComposeFile)
+
+      rsvp.get(url, handler)
+    }
+  }
+}
+
+fn get_container_name(container_names: List(String)) {
+  case list.first(container_names) {
+    Error(error) -> Error(error)
+    Ok(container_name) -> {
+      let container_name = case string.starts_with(container_name, "/") {
+        False -> container_name
+        True -> string.drop_start(container_name, 1)
+      }
+      Ok(container_name)
+    }
+  }
+}
+
+// NODE DATA ---------------------------------------------------------------
 
 fn update_node_data() -> Effect(Msg) {
   let url = "/api/node_data/"
@@ -165,9 +249,9 @@ fn view_selected_details(selected: Selected) -> Element(Msg) {
   case selected {
     None -> html.text("No item has been selected.")
     SelectedNode(node) -> view_node_details(node)
-    SelectedNodeContainer(container)
-    | SelectedVirtualMachineContainer(container) ->
-      view_container_details(container)
+    SelectedNodeContainer(container, compose_file)
+    | SelectedVirtualMachineContainer(container, compose_file) ->
+      view_container_details(container, compose_file)
     SelectedVirtualMachine(vm) -> view_virtual_machine_details(vm)
   }
 }
@@ -184,10 +268,33 @@ fn view_virtual_machine_details(vm: VirtualMachine) -> Element(Msg) {
   ])
 }
 
-fn view_container_details(container: Container) -> Element(Msg) {
-  html.div([], [
+fn view_container_details(
+  container: Container,
+  compose_file: String,
+) -> Element(Msg) {
+  html.div([attribute.styles([#("width", "100%")])], [
     html.p([], [
-      html.text(list.fold(container.data.names, "", fn(a, b) { a <> " " <> b })),
+      html.text(
+        get_container_name(container.data.names)
+        |> result.unwrap("Name not found"),
+      ),
+    ]),
+    html.div([attribute.styles([#("width", "100%"), #("display", "flex")])], [
+      html.textarea(
+        [
+          attribute.class("has-border"),
+          attribute.styles([
+            #("height", "50vh"),
+            #("color", white),
+            #("background-color", background),
+            #("display", "flex"),
+            #("flex-direction", "row"),
+            #("flex", "auto"),
+          ]),
+          event.on_change(UserUpdatedComposeFile),
+        ],
+        compose_file,
+      ),
     ]),
     html.p([], [
       html.text("Ports:"),
@@ -208,16 +315,6 @@ fn view_container_details(container: Container) -> Element(Msg) {
     ]),
     html.p([], [
       html.text("Created: " <> unix_seconds_to_string(container.data.created)),
-    ]),
-    html.p([], [
-      html.text("Mounts:"),
-      html.ul(
-        [],
-        container.data.mounts
-          |> list.map(fn(mount) {
-            html.li([], [html.text(mount.source <> ":" <> mount.destination)])
-          }),
-      ),
     ]),
   ])
 }
@@ -335,7 +432,7 @@ fn draw_svg_arrow(
 
 fn view_container(
   container: Container,
-  selector: fn(Container) -> Selected,
+  selector: fn(Container, String) -> Selected,
 ) -> Element(Msg) {
   let status_color = case container.data.state {
     "exited" -> red
@@ -345,7 +442,7 @@ fn view_container(
 
   html.div(
     [
-      event.on_click(UserSelectedItem(selector(container))),
+      event.on_click(UserSelectedItem(selector(container, ""))),
       attribute.class("clickable"),
       attribute.id("vm-container"),
       attribute.styles([

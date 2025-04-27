@@ -4,10 +4,14 @@
     src: url('/static/fonts/Excalifont-Regular.woff2') format("woff2");
 }
 
-:root {
+* {
     font-family: "Excalifont" !important;
-    font-size: 20px;
 }
+
+:root {
+    font-size: 18px;
+}
+
 
 .has-border {
     border-width: 3px;

@@ -1,4 +1,5 @@
 import envoy
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dynamic/decode
 import gleam/erlang
@@ -32,6 +33,8 @@ pub fn main() -> Nil {
 
     case method, path {
       Get, ["api", "node_data"] -> handle_get_node_data()
+      Get, ["compose", ..rest] -> server_compose(rest)
+      Post, ["compose", ..rest] -> write_compose(req, rest)
       Get, ["static", ..rest] -> serve_static(rest)
       Get, _ -> serve_app()
 
@@ -96,14 +99,19 @@ fn serve_app() {
   )
 }
 
-fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
-  let file_path = string.join(path_segments, "/")
+// FILE SERVING -----------------------------------------------------------------------------
 
-  let priv_dir = case erlang.priv_directory("server") {
+fn get_priv_dir() -> String {
+  case erlang.priv_directory("server") {
     Ok(dir) -> dir
     Error(_) -> "./priv"
   }
+}
 
+fn serve_static(path_segments: List(String)) -> Response(ResponseData) {
+  let file_path = string.join(path_segments, "/")
+
+  let priv_dir = get_priv_dir()
   let full_path = string.concat([priv_dir, "/static/", file_path])
 
   case simplifile.read_bits(full_path) {
@@ -138,6 +146,165 @@ fn determine_content_type(file_path: String) -> String {
       }
   }
 }
+
+// COMPOSE FILE HANDLING ----------------------------------------------------------------------
+
+fn server_compose(path_segments: List(String)) -> Response(ResponseData) {
+  case list.first(path_segments) {
+    Error(_) ->
+      response.new(404)
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_string(
+          "No container_name specified in /compose/container_name",
+        )),
+      )
+    Ok(container_name) -> {
+      let full_path = get_compose_path(container_name)
+
+      case simplifile.read_bits(full_path) {
+        Ok(content) -> {
+          let content_type = determine_content_type(full_path)
+
+          response.new(200)
+          |> response.set_header("content-type", content_type)
+          |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(content)))
+        }
+        Error(_) -> {
+          response.new(404)
+          |> response.set_body(
+            mist.Bytes(bytes_tree.from_string("File not found")),
+          )
+        }
+      }
+    }
+  }
+}
+
+fn write_compose(
+  req: Request(Connection),
+  path_segments: List(String),
+) -> Response(ResponseData) {
+  case list.first(path_segments) {
+    Error(_) ->
+      response.new(404)
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_string(
+          "No container_name specified in /compose/container_name",
+        )),
+      )
+    Ok(container_name) -> {
+      let full_path = get_compose_path(container_name)
+
+      case
+        result.try(request.get_header(req, "content-length"), fn(length) {
+          use length <- result.try(int.parse(length))
+          result.try(
+            mist.read_body(req, length)
+              |> result.replace_error(Nil),
+            fn(body_bits) {
+              simplifile.write_bits(to: full_path, bits: body_bits.body)
+              |> result.replace_error(Nil)
+            },
+          )
+        })
+      {
+        Error(_) -> {
+          response.new(500)
+          |> response.set_body(
+            mist.Bytes(bytes_tree.from_string("Something went wrong")),
+          )
+        }
+        Ok(_) ->
+          response.new(200)
+          |> response.set_body(
+            mist.Bytes(bytes_tree.from_string("File updated successfully")),
+          )
+      }
+    }
+  }
+}
+
+/// Tries to get the compose path from the container associated with the supplied container_name
+/// If we are running in an erlang shipment we assume we are running in the docker container named "docker_manager"
+/// It will try to add the "com.docker.compose.project.working_dir" directory to itself to ensure its available 
+/// If it cant find the working_dir it will return a path to `priv_dir/compose/container_name/docker-compose.yml`
+///
+fn get_compose_path(container_name: String) {
+  let work_dir =
+    try_get_compose_working_dir_from_container_labels(container_name)
+
+  case work_dir {
+    // we found an existing compose dir
+    Ok(work_dir) -> {
+      let compose_path =
+        try_get_compose_path_from_container_labels(container_name)
+
+      case compose_path {
+        Ok(compose_path) -> compose_path
+        Error(_) -> string.join([work_dir, "docker-compose.yml"], "/")
+      }
+    }
+    // we didnt find an existing compose dir, use default
+    Error(_) -> {
+      string.join(
+        [get_priv_dir(), "compose", container_name, "docker-compose.yml"],
+        "/",
+      )
+    }
+  }
+}
+
+fn try_get_compose_path_from_container_labels(container_name: String) {
+  use shell_result <- result.try(
+    shellout.command(
+      run: "curl",
+      with: [
+        "--unix-socket",
+        "/var/run/docker.sock",
+        "--silent",
+        "http:///v1.49/containers/" <> container_name <> "/json",
+      ],
+      in: ".",
+      opt: [],
+    )
+    |> result.replace_error(json.UnexpectedEndOfInput),
+  )
+
+  json.parse(
+    shell_result,
+    decode.at(
+      ["Config", "Labels", "com.docker.compose.project.config_files"],
+      decode.string,
+    ),
+  )
+}
+
+fn try_get_compose_working_dir_from_container_labels(container_name: String) {
+  use shell_result <- result.try(
+    shellout.command(
+      run: "curl",
+      with: [
+        "--unix-socket",
+        "/var/run/docker.sock",
+        "--silent",
+        "http:///v1.49/containers/" <> container_name <> "/json",
+      ],
+      in: ".",
+      opt: [],
+    )
+    |> result.replace_error(json.UnexpectedEndOfInput),
+  )
+
+  json.parse(
+    shell_result,
+    decode.at(
+      ["Config", "Labels", "com.docker.compose.project.working_dir"],
+      decode.string,
+    ),
+  )
+}
+
+// NODE DATA SERVING ----------------------------------------------------------------------------
 
 fn handle_get_node_data() -> Response(ResponseData) {
   let containers =
