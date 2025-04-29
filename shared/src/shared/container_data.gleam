@@ -136,13 +136,28 @@ fn encode_port(port: Port) -> json.Json {
 }
 
 fn port_decoder() -> decode.Decoder(Port) {
-  use ip <- decode.field("IP", decode.optional(decode.string))
-  use private_port <- decode.field("PrivatePort", decode.optional(decode.int))
-  use public_port <- decode.field("PublicPort", decode.optional(decode.int))
-  use port_type <- decode.field("Type", decode.optional(decode.string))
+  use ip <- decode.optional_field(
+    "IP",
+    option.None,
+    decode.optional(decode.string),
+  )
+  use private_port <- decode.optional_field(
+    "PrivatePort",
+    option.None,
+    decode.optional(decode.int),
+  )
+  use public_port <- decode.optional_field(
+    "PublicPort",
+    option.None,
+    decode.optional(decode.int),
+  )
+  use port_type <- decode.optional_field(
+    "Type",
+    option.None,
+    decode.optional(decode.string),
+  )
   decode.success(Port(ip:, private_port:, public_port:, port_type:))
 }
-
 
 pub type HostConfig {
   HostConfig(network_mode: String, annotations: dict.Dict(String, String))

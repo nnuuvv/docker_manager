@@ -9,5 +9,11 @@ services:
       PORT: 3001 # optionally set port, defaults to 3000 if unset
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # add any folder with existing docker-compose files you want to use as 1:1 bindings; i.e.: 
+
+      # if you want to be able to access the docker-compose.yml files from outside of docker manager,
+      # map /app/server/priv/compose to some external directory; i.e.:
+      - ./compose:/app/server/priv/compose
+
+      # we use the docker compose tags on the containers to locate the compose file;
+      # add any folder with existing docker-compose files you want to use (1:1 bindings); i.e.: 
       - /home/liv/source/gleam/docker_manager:/home/liv/source/gleam/docker_manager

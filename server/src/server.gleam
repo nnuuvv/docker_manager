@@ -1,4 +1,5 @@
 import envoy
+import filepath
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dynamic/decode
@@ -25,6 +26,8 @@ import shared/node
 import shared/virtual_machine
 import shellout
 import simplifile
+
+const docker_api_version = "v1.49"
 
 pub fn main() -> Nil {
   let handler = fn(req: Request(Connection)) -> Response(ResponseData) {
@@ -184,49 +187,70 @@ fn write_compose(
   req: Request(Connection),
   path_segments: List(String),
 ) -> Response(ResponseData) {
-  case list.first(path_segments) {
-    Error(_) ->
-      response.new(404)
-      |> response.set_body(
-        mist.Bytes(bytes_tree.from_string(
-          "No container_name specified in /compose/container_name",
-        )),
+  request.get_header(req, "content-length")
+  |> result.replace_error(new_response(
+    400,
+    "Couldn't find 'content-length' header",
+  ))
+  |> result.try(fn(length) {
+    int.parse(length)
+    |> result.replace_error(new_response(400, "'content-length' not a number"))
+  })
+  |> result.try(fn(length) {
+    mist.read_body(req, length)
+    |> result.map_error(fn(read_error) {
+      new_response(
+        400,
+        "Error while reading body: " <> string.inspect(read_error),
       )
-    Ok(container_name) -> {
+    })
+  })
+  |> result.try(fn(body_bits) {
+    bit_array.to_string(body_bits.body)
+    |> result.replace_error(new_response(
+      500,
+      "Failed to parse body bits into string ",
+    ))
+  })
+  |> result.try(fn(body) {
+    json.parse(body, decode.string)
+    |> result.map_error(fn(error) {
+      new_response(500, "Failed to parse json: " <> string.inspect(error))
+    })
+  })
+  |> result.try(fn(body) {
+    list.first(path_segments)
+    |> result.replace_error(new_response(
+      404,
+      "No container_name specified in /compose/container_name",
+    ))
+    |> result.try(fn(container_name) {
       let full_path = get_compose_path(container_name)
 
-      case
-        result.try(request.get_header(req, "content-length"), fn(length) {
-          use length <- result.try(int.parse(length))
-          result.try(
-            mist.read_body(req, length)
-              |> result.replace_error(Nil),
-            fn(body_bits) {
-              simplifile.write_bits(to: full_path, bits: body_bits.body)
-              |> result.replace_error(Nil)
-            },
-          )
-        })
-      {
-        Error(_) -> {
-          response.new(500)
-          |> response.set_body(
-            mist.Bytes(bytes_tree.from_string("Something went wrong")),
-          )
-        }
-        Ok(_) ->
-          response.new(200)
-          |> response.set_body(
-            mist.Bytes(bytes_tree.from_string("File updated successfully")),
-          )
-      }
-    }
-  }
+      // make sure the file exists
+      let _ =
+        simplifile.create_directory_all(filepath.directory_name(full_path))
+
+      simplifile.write(to: full_path, contents: body)
+      |> result.map_error(fn(write_error) {
+        new_response(
+          500,
+          "Error while writing to file: " <> string.inspect(write_error),
+        )
+      })
+    })
+    |> result.replace(new_response(200, "File updated successfully"))
+  })
+  |> result.unwrap_both()
+  |> echo
+}
+
+fn new_response(code: Int, message: String) {
+  response.new(code)
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(message)))
 }
 
 /// Tries to get the compose path from the container associated with the supplied container_name
-/// If we are running in an erlang shipment we assume we are running in the docker container named "docker_manager"
-/// It will try to add the "com.docker.compose.project.working_dir" directory to itself to ensure its available 
 /// If it cant find the working_dir it will return a path to `priv_dir/compose/container_name/docker-compose.yml`
 ///
 fn get_compose_path(container_name: String) {
@@ -262,7 +286,11 @@ fn try_get_compose_path_from_container_labels(container_name: String) {
         "--unix-socket",
         "/var/run/docker.sock",
         "--silent",
-        "http:///v1.49/containers/" <> container_name <> "/json",
+        "http:///"
+          <> docker_api_version
+          <> "/containers/"
+          <> container_name
+          <> "/json",
       ],
       in: ".",
       opt: [],
@@ -287,7 +315,11 @@ fn try_get_compose_working_dir_from_container_labels(container_name: String) {
         "--unix-socket",
         "/var/run/docker.sock",
         "--silent",
-        "http:///v1.49/containers/" <> container_name <> "/json",
+        "http:///"
+          <> docker_api_version
+          <> "/containers/"
+          <> container_name
+          <> "/json",
       ],
       in: ".",
       opt: [],
@@ -332,8 +364,10 @@ fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
     shellout.command(
       run: "curl",
       with: [
-        "--unix-socket", "/var/run/docker.sock", "--silent",
-        "http:///v1.49/containers/json?all=true",
+        "--unix-socket",
+        "/var/run/docker.sock",
+        "--silent",
+        "http:///" <> docker_api_version <> "/containers/json?all=true",
       ],
       in: ".",
       opt: [],

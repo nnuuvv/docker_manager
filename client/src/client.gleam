@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/dynamic
 import gleam/dynamic/decode
+import gleam/http/response
 import gleam/int
 import gleam/io
 import gleam/json
@@ -24,9 +25,13 @@ import shared/element_state
 import shared/node.{type Node}
 import shared/virtual_machine.{type VirtualMachine}
 
+const green = "#2f9e44"
+
 const red = "#fa5252"
 
-const green = "#2f9e44"
+const orange = "#fab005"
+
+const blue = "#4dabf7"
 
 const white = "#d8d4d4"
 
@@ -72,6 +77,12 @@ pub opaque type Msg {
   ServerReturnedComposeFile(file: Result(String, rsvp.Error))
   UserUpdatedComposeFile(file: String)
   UserClickedSaveComposeFile
+  ServerSavedComposeFile(
+    save_result: Result(response.Response(String), rsvp.Error),
+  )
+  UserClickedStartContainer
+  UserClickedStopContainer
+  UserClickedRestartContainer
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -84,7 +95,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ServerUpdatedNodeData(data) -> {
       let value = case data {
-        Error(error) -> {
+        Error(_error) -> {
           model
         }
         Ok(node) -> {
@@ -113,7 +124,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ServerReturnedComposeFile(file) -> {
       case file {
-        Error(error) -> {
+        Error(_error) -> {
           #(model, effect.none())
         }
         Ok(file) -> {
@@ -128,12 +139,46 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, selected: selected), effect.none())
     }
     UserClickedSaveComposeFile -> {
+      let effect = save_compose_file(model.selected)
+      #(model, effect)
+    }
+    ServerSavedComposeFile(_save_result) -> {
+      // add some sort of info for the end user that it either saved or had an issue saving
+      #(model, effect.none())
+    }
+    UserClickedStartContainer -> {
+      todo
+    }
+    UserClickedStopContainer -> {
+      todo
+    }
+    UserClickedRestartContainer -> {
       todo
     }
   }
 }
 
 // COMPOSE HANDLING --------------------------------------------------------
+
+fn save_compose_file(selected: Selected) -> Effect(Msg) {
+  case selected {
+    SelectedNodeContainer(container, file)
+    | SelectedVirtualMachineContainer(container, file) -> {
+      let container_name = get_container_name(container.data.names)
+      case container_name {
+        Error(_) -> effect.none()
+        Ok(container_name) -> {
+          let url = "/compose/" <> container_name
+
+          let handler = rsvp.expect_ok_response(ServerSavedComposeFile)
+
+          rsvp.post(url, json.string(file), handler)
+        }
+      }
+    }
+    _ -> effect.none()
+  }
+}
 
 fn update_compose_file(selected: Selected, file) -> Selected {
   case selected {
@@ -148,26 +193,20 @@ fn update_compose_file(selected: Selected, file) -> Selected {
 fn handle_get_compose_file(selected: Selected) -> Effect(Msg) {
   case selected {
     SelectedNodeContainer(container, _)
-    | SelectedVirtualMachineContainer(container, _) ->
-      get_compose_file(container.data.names)
-    _ -> effect.none()
-  }
-}
+    | SelectedVirtualMachineContainer(container, _) -> {
+      let container_name = get_container_name(container.data.names)
+      case container_name {
+        Error(_) -> effect.none()
+        Ok(container_name) -> {
+          let url = "/compose/" <> container_name
 
-// should realistically use something more identifying than the container name
-// but i want to be able to continue using my current docker compose folder structure
-// without having to figure out what id is what container etc.
-fn get_compose_file(container_names: List(String)) -> Effect(Msg) {
-  let container_name = get_container_name(container_names)
-  case container_name {
-    Error(_) -> effect.none()
-    Ok(container_name) -> {
-      let url = "/compose/" <> container_name
+          let handler = rsvp.expect_text(ServerReturnedComposeFile)
 
-      let handler = rsvp.expect_text(ServerReturnedComposeFile)
-
-      rsvp.get(url, handler)
+          rsvp.get(url, handler)
+        }
+      }
     }
+    _ -> effect.none()
   }
 }
 
@@ -272,13 +311,64 @@ fn view_container_details(
   container: Container,
   compose_file: String,
 ) -> Element(Msg) {
+  let square_button = [#("aspect-ratio", "1 / 1")]
+
   html.div([attribute.styles([#("width", "100%")])], [
-    html.p([], [
-      html.text(
-        get_container_name(container.data.names)
-        |> result.unwrap("Name not found"),
-      ),
-    ]),
+    html.p(
+      [attribute.styles([#("display", "flex"), #("flex-direction", "row")])],
+      [
+        html.text(
+          get_container_name(container.data.names)
+          |> result.unwrap("Name not found"),
+        ),
+        html.div(
+          [
+            attribute.id("button_panel"),
+            attribute.styles([
+              #("display", "flex"),
+              #("justify_content", "space-between"),
+            ]),
+          ],
+          [
+            html.button(
+              [
+                attribute.id("start_button"),
+                attribute.styles([#("background-color", green), ..square_button]),
+                event.on_click(UserClickedStartContainer),
+              ],
+              [],
+            ),
+            html.button(
+              [
+                attribute.id("stop_button"),
+                attribute.styles([#("background-color", red), ..square_button]),
+                event.on_click(UserClickedStopContainer),
+              ],
+              [],
+            ),
+            html.button(
+              [
+                attribute.id("restart_button"),
+                attribute.styles([
+                  #("background-color", orange),
+                  ..square_button
+                ]),
+                event.on_click(UserClickedRestartContainer),
+              ],
+              [],
+            ),
+            html.button(
+              [
+                attribute.id("update_apply_button"),
+                attribute.styles([#("background-color", blue), ..square_button]),
+                event.on_click(UserClickedSaveComposeFile),
+              ],
+              [],
+            ),
+          ],
+        ),
+      ],
+    ),
     html.div([attribute.styles([#("width", "100%"), #("display", "flex")])], [
       html.textarea(
         [
@@ -307,6 +397,7 @@ fn view_container_details(
                 int.to_string(option.unwrap(port.public_port, 0))
                 <> ":"
                 <> int.to_string(option.unwrap(port.private_port, 0))
+                <> "/"
                 <> option.unwrap(port.port_type, ""),
               ),
             ])
