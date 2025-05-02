@@ -1,0 +1,49 @@
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 10.0.0.0/8
+        gateway: 10.0.0.50
+
+services:
+  client-1:
+    build: .
+    networks:
+      internal:
+        ipv4_address: 10.0.0.10
+    environment:
+      - ERL_FLAGS=-name cluster@10.0.0.10 -setcookie my_cookie
+      - HOSTS=10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14
+  client-2:
+    build: .
+    networks:
+      internal:
+        ipv4_address: 10.0.0.11
+    environment: 
+      - ERL_FLAGS=-name cluster@10.0.0.11 -setcookie my_cookie
+      - HOSTS=10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14
+  client-3:
+    build: .
+    networks:
+      internal:
+        ipv4_address: 10.0.0.12
+    environment: 
+      - ERL_FLAGS=-name cluster@10.0.0.12 -setcookie my_cookie
+      - HOSTS=10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14
+  client-4:
+    build: .
+    networks:
+      internal:
+        ipv4_address: 10.0.0.13
+    environment: 
+      - ERL_FLAGS=-name cluster@10.0.0.13 -setcookie my_cookie
+      - HOSTS=10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14
+  client-5:
+    build: .
+    networks:
+      internal:
+        ipv4_address: 10.0.0.14
+    environment: 
+      - ERL_FLAGS=-name cluster@10.0.0.14 -setcookie my_cookie
+      - HOSTS=10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14

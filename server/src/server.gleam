@@ -340,7 +340,7 @@ fn try_get_compose_working_dir_from_container_labels(container_name: String) {
 
 fn handle_get_node_data() -> Response(ResponseData) {
   let containers =
-    get_running_containers()
+    get_containers()
     |> option.from_result()
     |> option.map(fn(data) {
       data |> list.map(fn(data) { container.Container(data) })
@@ -359,7 +359,13 @@ fn handle_get_node_data() -> Response(ResponseData) {
   |> response.set_header("content-type", "application/json")
 }
 
-fn get_running_containers() -> Result(List(ContainerData), json.DecodeError) {
+fn get_hostname() -> String {
+  shellout.command(run: "hostname", with: [], in: ".", opt: [])
+  |> result.replace_error("issue-getting-hostname")
+  |> result.unwrap_both()
+}
+
+fn get_containers() -> Result(List(ContainerData), json.DecodeError) {
   use shell_result <- result.try(
     shellout.command(
       run: "curl",
